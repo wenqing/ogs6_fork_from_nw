@@ -1,5 +1,15 @@
 
 #include <iostream>
+
+#include <map>
+#include <limits>
+
+#ifdef USE_PETSC  // Add PETSC for test. WW
+
+#include "petscksp.h"
+#include "PETSC/PETScLinearSolver.h"
+
+#else // not  USE_PETSC
 //#include <cmath>
 //#include "LinAlg/Dense/Matrix.h"
 //#include "LinAlg/Dense/SymmetricMatrix.h"
@@ -7,19 +17,26 @@
 #include "LinAlg/Sparse/CRSMatrixDiagPrecond.h"
 #include "LinAlg/Sparse/CRSMatrix.h"
 #include "LinAlg/Sparse/SparseTableCRS.h"
+#include "LinAlg/Solvers/CG.h"
 
 #include "sparse.h"
 
 //#include "LinAlg/Dense/TemplateMatrixNd.h"
+#endif //USE_PETSC
+
+#ifdef USE_EIGEN
 #include "LinAlg/Sparse/EigenInterface.h"
-#include "LinAlg/Solvers/CG.h"
+#include <Eigen>
+#endif
+
+
 #include "Mesh.h"
 #include "IO/MeshIOOGSAscii.h"
 #include "IO/MeshIOLegacyVtk.h"
 #include "Tools/MeshGenerator.h"
 #include "CPUTimeTimer.h"
 #include "RunTimeTimer.h"
-#include <Eigen>
+
 #include "MeshSparseTable.h"
 
 #ifdef _OPENMP
@@ -81,7 +98,7 @@ void setDirichletBC_Case1(MeshLib::UnstructuredMesh *msh, vector<IndexValue> &li
   }
 }
 
-#ifndef USE_EIGEN
+#if !defined(USE_EIGEN) && !defined( USE_PETSC) 
 void setKnownXi_ReduceSizeOfEQS(vector<IndexValue> &list_dirichlet_bc, MathLib::CRSMatrix<double, INDEX_TYPE> &eqsA, double* org_eqsRHS, double* org_eqsX, double** eqsRHS, double** eqsX, map<INDEX_TYPE,INDEX_TYPE> &map_solved_orgEqs)
 {
     const size_t n_org_rows = eqsA.getNRows();
@@ -133,11 +150,15 @@ int main(int argc, char *argv[])
     std::cout << "##### CURRENT SETTING #####" << std::endl;	
 #ifdef LIS
     std::cout << "- Linear Solver: LIS" << std::endl;
+#elif USE_PETSC
+    std::cout << "- Linear Solver: PETSc" << std::endl;
 #else
     std::cout << "- Linear Solver: Tom" << std::endl;
 #endif
 #ifdef USE_EIGEN
     std::cout << "- Matrix Library: Eigen" << std::endl;
+#elif USE_PETSC
+    std::cout << "- Matrix Library: PETSc" << std::endl;
 #else
     std::cout << "- Matrix Library: CRSMatrix" << std::endl;
 #endif
@@ -202,17 +223,33 @@ int main(int argc, char *argv[])
     }
 #endif
 #endif
+
+#ifdef USE_PETSC
+  int rank_p, size_p;
+  PetscLogDouble v1,v2;
+  char help[] = "Using PETSc package\n";
+  //PetscInitialize(argc, argv, help);
+  PetscInitialize(&argc,&argv,(char *)0,help);
+  PetscGetTime(&v1);
+
+  MPI_Comm_rank(PETSC_COMM_WORLD, &rank_p);
+  MPI_Comm_size(PETSC_COMM_WORLD, &size_p);
+  PetscSynchronizedPrintf(PETSC_COMM_WORLD, "Number of CPUs: %d, rank: %d\n", size_p, rank_p);
+  PetscSynchronizedFlush(PETSC_COMM_WORLD);
+#endif
+
+
     //-- setup a problem -----------------------------------------------
     //set mesh
     std::string strMeshFile = "";
     if (argc<2) {
-      std::cout << "Input a mesh file name:" << endl;
+      std::cout << "Input file name (non extension):" << endl;
       cin >> strMeshFile;
     } else {
       strMeshFile = argv[1];
     }
     vector<MeshLib::IMesh*> vec_mesh;
-    MeshLib::MeshIOOGS::readMesh(strMeshFile, vec_mesh);
+    MeshLib::MeshIOOGS::readMesh(strMeshFile+".msh", vec_mesh);
     if (vec_mesh.size()==0) {
         std::cout << "Fail to read a mesh file: " << strMeshFile << std::endl;
         return 0;
@@ -245,6 +282,37 @@ int main(int argc, char *argv[])
     const size_t dim_eqs = msh->getNumberOfNodes();
     MathLib::SparseTableCRS<INDEX_TYPE>* crs = FemLib::generateSparseTableCRS<INDEX_TYPE>(msh);
     //FemLib::outputSparseTableCRS(crs);
+
+
+#ifdef USE_PETSC
+     float petsc_tol;
+     string solver_name;
+     string prec_name;
+     string str_buff;
+
+     str_buff = strMeshFile+".num";
+
+     ifstream num_is(str_buff.c_str());
+     num_is>>petsc_tol>>solver_name>>prec_name>>ws;
+     num_is.close();
+
+     PETScLinearSolver *eqs = new PETScLinearSolver(dim_eqs);
+     eqs->Init();
+     eqs->set_rank_size(rank_p, size_p);
+    
+     eqs->Config(petsc_tol, solver_name.c_str(), prec_name.c_str());
+     eqs->Initialize(); 
+
+     PetscPrintf(PETSC_COMM_WORLD,"Build linear equation.\n");
+
+     double* eqsX(new double[dim_eqs]);
+     for (size_t i=0; i<dim_eqs; i++) 
+        eqsX[i] = 0.0;
+
+
+
+#else // No PETSC 
+     //
 #ifdef USE_EIGEN
     Eigen::MappedSparseMatrix<double, Eigen::RowMajor> eqsA(dim_eqs, dim_eqs, crs->nonzero, crs->row_ptr, crs->col_idx, crs->data);
 #else
@@ -256,20 +324,34 @@ int main(int argc, char *argv[])
     MathLib::CRSMatrixOpenMP<double,unsigned> eqsA(static_cast<unsigned>(crs->dimension), crs->row_ptr, crs->col_idx, crs->data, nthreads);
 #endif
 #else
+
+
     MathLib::CRSMatrix<double, INDEX_TYPE> eqsA(crs->dimension, crs->row_ptr, crs->col_idx, crs->data);
 //    MathLib::CRSMatrixDiagPrecond eqsA(crs->dimension, crs->row_ptr, crs->col_idx, crs->data);
-#endif
 
 #endif
+#endif
+
+
     double* eqsX(new double[dim_eqs]);
     double* eqsRHS(new double[dim_eqs]);
     for (size_t i=0; i<dim_eqs; i++) eqsX[i] = 0.0;
     for (size_t i=0; i<dim_eqs; i++) eqsRHS[i] = .0;
+#endif // end ifdef USE_PETSC
+
 
     //assembly EQS
     const size_t n_ele = msh->getNumberOfElements();
+
+#ifdef USE_EIGEN
     Eigen::Matrix3d local_K = Eigen::Matrix3d::Zero();
-    const size_t n_ele_nodes = 3;
+#endif
+
+#ifdef USE_PETSC
+    double local_K[3][3]; 
+#endif
+	
+	const size_t n_ele_nodes = 3;
     double nodes_x[n_ele_nodes], nodes_y[n_ele_nodes], nodes_z[n_ele_nodes];
     double a[n_ele_nodes], b[n_ele_nodes], c[n_ele_nodes];
     size_t dof_map[n_ele_nodes];
@@ -286,9 +368,9 @@ int main(int argc, char *argv[])
     CPUTimeTimer cpu_timer_assembly;
     run_timer_assembly.start();
     cpu_timer_assembly.start();
-    double time0 = omp_get_wtime();
 
     #ifdef _OPENMP
+    double time0 = omp_get_wtime();
     #pragma omp parallel for default(none) private(ele, dof_map, pt, nodes_x, nodes_y, nodes_z, a, b, c, local_K) shared(msh, eqsA)
     #endif
     for (long i_ele=0; i_ele<static_cast<long>(n_ele); i_ele++) {
@@ -319,6 +401,7 @@ int main(int argc, char *argv[])
 
         // assemble local EQS
         // Int{w S ph/pt + div(w) K div(p)}dA = Int{w K div(p)}dL
+#ifdef USE_EIGEN
         local_K(0,0) = b[0]*b[0] + c[0]*c[0];
         local_K(0,1) = b[0]*b[1] + c[0]*c[1];
         local_K(0,2) = b[0]*b[2] + c[0]*c[2];
@@ -330,20 +413,40 @@ int main(int argc, char *argv[])
         for (size_t i=0; i<n_ele_nodes; i++)
             for (size_t j=0; j<i; j++)
                 local_K(i,j) = local_K(j,i);
+#endif
+
+#ifdef USE_PETSC
+        local_K[0][0] = (b[0]*b[0] + c[0]*c[0])*A;
+        local_K[0][1] = (b[0]*b[1] + c[0]*c[1])*A;
+        local_K[0][2] = (b[0]*b[2] + c[0]*c[2])*A;
+        local_K[1][1] = (b[1]*b[1] + c[1]*c[1])*A;
+        local_K[1][2] = (b[1]*b[2] + c[1]*c[2])*A;
+        local_K[2][2] = (b[2]*b[2] + c[2]*c[2])*A;
+        local_K[2][1] =  local_K[1][2];
+#endif
 
         // add into global EQS
         for (size_t i=0; i<n_ele_nodes; i++) {
             for (size_t j=0; j<n_ele_nodes; j++) {
-#ifdef USE_EIGEN
+
+#ifdef USE_PETSC
+            eqs->addMatrixEntry(dof_map[i], dof_map[j], local_K[i][j]);
+
+#elif USE_EIGEN
+#ifdef _OPENMP
               #pragma omp atomic
               eqsA.coeffRef(dof_map[i], dof_map[j]) += local_K(i,j);
 #else
               eqsA.addValue(dof_map[i], dof_map[j], local_K(i,j));
 #endif
+#endif
             }
         }
     }
-    double time1 = omp_get_wtime();
+
+#ifdef USE_EIGEN
+	double time1 = omp_get_wtime();
+#endif
     run_timer_assembly.stop();
     cpu_timer_assembly.stop();
 
@@ -356,6 +459,45 @@ int main(int argc, char *argv[])
     cpu_timer3.start();
 
     //apply Dirichlet BC
+#ifdef USE_PETSC
+    eqs->AssembleMatrixPETSc();
+    eqs->AssembleRHS_PETSc();
+    eqs->AssembleUnkowns_PETSc();
+   
+
+    int nrows, id;
+    double val;
+    PetscInt *rows_toberemoved;
+    
+    nrows =(int)list_dirichlet_bc.size();   
+    rows_toberemoved = new PetscInt[nrows];
+
+    for (size_t i=0; i<nrows; i++) 
+    {
+        IndexValue &bc = list_dirichlet_bc.at(i);
+        id = bc.id;
+        val = bc.val;
+
+        eqs->set_bVectorEntry(id, val);         
+        eqs->set_xVectorEntry(id, val);   
+
+    }
+
+    eqs->zeroRows_in_Matrix(nrows, rows_toberemoved);
+     
+               
+    eqs->AssembleRHS_PETSc();
+    eqs->AssembleUnkowns_PETSc();
+    eqs->AssembleMatrixPETSc();
+
+    eqs->Solver();
+
+    eqs->UpdateSolutions(eqsX, eqsX);
+
+    delete [] rows_toberemoved;
+    rows_toberemoved = NULL;  
+#else // no PETSc
+
 #if 1
 #ifdef USE_EIGEN
     for (size_t i=0; i<list_dirichlet_bc.size(); i++) {
@@ -373,6 +515,7 @@ int main(int argc, char *argv[])
     run_timer3.stop();
     cpu_timer3.stop();
 #endif
+#endif
 
     //apply ST
     //MathLib::EigenTools::outputEQS("eqs2.txt", eqsA, eqsX, eqsRHS);
@@ -388,12 +531,20 @@ int main(int argc, char *argv[])
     //-- solve EQS -----------------------------------------------
     //set up
     cout << "->solve EQS" << endl;
+
+    //omp_set_num_threads (1);
+
+
+#ifdef USE_PETSC
+
+
+
+
+#else
     CPUTimeTimer cpu_timer2;
     RunTimeTimer run_timer2;
     run_timer2.start();
     cpu_timer2.start();
-
-    //omp_set_num_threads (1);
 
 #ifndef NO_SOLVER
 #ifdef LIS
@@ -441,8 +592,13 @@ int main(int argc, char *argv[])
 #endif
 #endif
 #endif
+
+
     run_timer2.stop();
     cpu_timer2.stop();
+
+#endif //end USE_PETSC
+
 
     run_timer.stop();
     cpu_timer.stop();
@@ -462,9 +618,12 @@ int main(int argc, char *argv[])
     cout << "CPU time = " << cpu_timer3.elapsed() << endl;
     cout << "Run time = " << run_timer3.elapsed() << endl;
     cout << "---------------------" << endl;
+
+#ifndef USE_PETSC
     cout << "Linear solver:" << endl;
     cout << "CPU time = " << cpu_timer2.elapsed() << endl;
     cout << "Run time = " << run_timer2.elapsed() << endl;
+#endif
 
     // output results
 #ifdef OUTPUT_VTK
@@ -483,6 +642,19 @@ int main(int argc, char *argv[])
     //delete [] crs->row_ptr;
     //delete [] crs->col_idx;
     ////delete [] crs->data;
+
+
+#ifdef USE_PETSC
+
+  delete [] eqsX;
+
+  PetscGetTime(&v2);
+  PetscPrintf(PETSC_COMM_WORLD,"\t\n>>Total elapsed time:%f s\n",v2-v1);
+  
+  PetscFinalize();
+
+#else
+
 #ifdef USE_EIGEN
     delete crs;
 #else
@@ -491,6 +663,8 @@ int main(int argc, char *argv[])
 #endif
     delete [] eqsX;
     delete [] eqsRHS;
+
+#endif
 
     return 0;
 }

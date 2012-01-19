@@ -16,12 +16,25 @@ SET ( MathLib_Files
 SOURCE_GROUP( MathLib FILES ${MathLib_Files})
 SET ( SOURCES ${SOURCES} ${MathLib_Files})
 
+IF(USE_PETSC)
+  SET ( PETSc_Files
+	PETSC/PETScLinearSolver.h        
+	PETSC/PETScLinearSolver.cpp
+  )
+  SOURCE_GROUP( MathLib\\PETSC FILES ${PETSc_Files})
+  SET ( SOURCES ${SOURCES} ${PETSc_Files})
+ENDIF(USE_PETSC)
+
+
 SET ( MathLib_LinAlg_Files
 	LinAlg/MatrixBase.h
 	LinAlg/VectorNorms.h
 )
 SOURCE_GROUP( MathLib\\LinAlg FILES ${MathLib_LinAlg_Files})
 SET ( SOURCES ${SOURCES} ${MathLib_LinAlg_Files})
+
+
+IF(NOT USE_PETSC)
 
 SET ( MathLib_LinAlg_Dense_Files
 	LinAlg/Dense/Matrix.h
@@ -91,6 +104,9 @@ IF (METIS_FOUND)
 		${MathLib_LinAlg_Sparse_NestedDissectionPermutation_SOURCES}
 	)
 ENDIF ()
+
+ENDIF( NOT USE_PETSC)
+
 
 #Include
 INCLUDE_DIRECTORIES (

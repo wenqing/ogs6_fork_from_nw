@@ -1,6 +1,8 @@
 
 #FIND_PACKAGE ( Eigen REQUIRED )
 #FIND_PACKAGE ( LIS REQUIRED )
+
+IF(TEST_Matrix)
 IF(NOT MSVC)
 	## pthread ##
 	SET ( CMAKE_THREAD_PREFER_PTHREAD On )
@@ -15,6 +17,8 @@ IF(NOT MSVC)
         	MESSAGE (STATUS "pthread library found." )
 	ENDIF (CMAKE_USE_PTHREADS_INIT )
 ENDIF(NOT MSVC)
+ENDIF(TEST_Matrix)
+
 
 INCLUDE_DIRECTORIES(
         .
@@ -52,3 +56,7 @@ TARGET_LINK_LIBRARIES ( FEMTests
 #	FemLib
 )
 
+###WW
+IF(USE_PETSC)
+        target_link_libraries(FEMTests  ${PETSC_LIBRARIES})
+ENDIF(USE_PETSC)
