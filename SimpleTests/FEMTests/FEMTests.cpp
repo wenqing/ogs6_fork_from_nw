@@ -502,6 +502,9 @@ int main(int argc, char *argv[])
 
     delete [] rows_toberemoved;
     rows_toberemoved = NULL;  
+
+
+
 #else // no PETSc
 
 #if 1
@@ -534,19 +537,14 @@ int main(int argc, char *argv[])
 //    std::cout << "ok" << std::endl;
 #endif
 
+
+#ifndef USE_PETSC
     //-- solve EQS -----------------------------------------------
     //set up
     cout << "->solve EQS" << endl;
 
     //omp_set_num_threads (1);
 
-
-#ifdef USE_PETSC
-
-
-
-
-#else
     CPUTimeTimer cpu_timer2;
     RunTimeTimer run_timer2;
     run_timer2.start();
@@ -632,13 +630,23 @@ int main(int argc, char *argv[])
 #endif
 
     // output results
+#define  nOUTPUT_VTK
 #ifdef OUTPUT_VTK
+
+#ifdef USE_PETSC
+    if(rank_p==0)
+    {
+#endif
     cout << "->output results" << endl;
     std::vector<MeshLib::NodalScalarValue> nodalValues;
     string str = "Head";
     MeshLib::NodalScalarValue temp("Head", eqsX);
     nodalValues.push_back(temp);
     MeshLib::MeshIOLegacyVtk4Simulation::WriteAsciiFile("output.vtk", *msh, 1, 1.0, nodalValues);
+#ifdef USE_PETSC
+    }
+#endif
+
 #endif
     //release memory
 #ifdef LIS
