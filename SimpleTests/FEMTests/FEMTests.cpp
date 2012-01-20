@@ -285,7 +285,7 @@ int main(int argc, char *argv[])
 
 
 #ifdef USE_PETSC
-     float petsc_tol;
+     double petsc_tol;
      string solver_name;
      string prec_name;
      string str_buff;
@@ -295,6 +295,11 @@ int main(int argc, char *argv[])
      ifstream num_is(str_buff.c_str());
      num_is>>petsc_tol>>solver_name>>prec_name>>ws;
      num_is.close();
+
+     PetscPrintf(PETSC_COMM_WORLD,"Solver:         %s\n", solver_name.c_str());
+     PetscPrintf(PETSC_COMM_WORLD,"Preconditioner: %s\n", prec_name.c_str());
+     PetscPrintf(PETSC_COMM_WORLD,"Tolerance:      %g\n", petsc_tol);
+
 
      PETScLinearSolver *eqs = new PETScLinearSolver(dim_eqs);
      eqs->Init();
@@ -478,6 +483,7 @@ int main(int argc, char *argv[])
         id = bc.id;
         val = bc.val;
 
+	rows_toberemoved[i] = id;
         eqs->set_bVectorEntry(id, val);         
         eqs->set_xVectorEntry(id, val);   
 
@@ -512,10 +518,10 @@ int main(int argc, char *argv[])
     map<INDEX_TYPE,INDEX_TYPE> map_solved_orgEqs;
     setKnownXi_ReduceSizeOfEQS(list_dirichlet_bc, eqsA, org_eqsRHS, org_eqsX, &eqsRHS, &eqsX, map_solved_orgEqs);
 #endif
+#endif
+#endif
     run_timer3.stop();
     cpu_timer3.stop();
-#endif
-#endif
 
     //apply ST
     //MathLib::EigenTools::outputEQS("eqs2.txt", eqsA, eqsX, eqsRHS);
@@ -646,6 +652,7 @@ int main(int argc, char *argv[])
 
 #ifdef USE_PETSC
 
+  delete eqs;
   delete [] eqsX;
 
   PetscGetTime(&v2);
