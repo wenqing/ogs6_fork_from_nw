@@ -5,7 +5,6 @@
 #include <limits>
 
 #ifdef USE_PETSC  // Add PETSC for test. WW
-
 #include "petscksp.h"
 #include "PETSC/PETScLinearSolver.h"
 
@@ -76,8 +75,8 @@ struct IndexValue {
 
 void setDirichletBC_Case1(MeshLib::UnstructuredMesh *msh, vector<IndexValue> &list_dirichlet_bc)
 {
-  const double head_left = 1.0;
-  const double head_right = 0.0;
+  const double head_left = 900.0;
+  const double head_right = 300.0;
   double x_min=1e+99, x_max = -1e+99;
   double pt[3];
   //search x min/max
@@ -308,11 +307,15 @@ int main(int argc, char *argv[])
      eqs->Config(petsc_tol, solver_name.c_str(), prec_name.c_str());
      eqs->Initialize(); 
 
+
      PetscPrintf(PETSC_COMM_WORLD,"Build linear equation.\n");
 
      double* eqsX(new double[dim_eqs]);
      for (size_t i=0; i<dim_eqs; i++) 
+     {
         eqsX[i] = 0.0;
+
+     }
 
 
 
@@ -427,6 +430,9 @@ int main(int argc, char *argv[])
         local_K[1][1] = (b[1]*b[1] + c[1]*c[1])*A;
         local_K[1][2] = (b[1]*b[2] + c[1]*c[2])*A;
         local_K[2][2] = (b[2]*b[2] + c[2]*c[2])*A;
+        
+        local_K[1][0] =  local_K[0][1];
+        local_K[2][0] =  local_K[0][2];
         local_K[2][1] =  local_K[1][2];
 #endif
 
